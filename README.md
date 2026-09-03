@@ -18,7 +18,7 @@ Design inspired by KimiCode's side-question feature ([MoonshotAI/kimi-cli PR #17
 
 ## Features
 
-- `/btw <question>` — open the panel and ask; the answer streams in live
+- `/btw <question>` — open the panel and ask; the answer streams in live (plain-text fast path while generating — no per-frame markdown re-parse — then markdown-polished on completion)
 - Follow-up questions from the panel's own input (side-thread history is kept as context)
 - Read-only snapshot of your main session (branch messages packed under a ~20k token budget) so the side answer knows what you're working on
 - **Never pollutes the main transcript** — the side thread lives in process memory only and is gone on exit

@@ -17,6 +17,7 @@ import {
 	Input,
 	Key,
 	Markdown,
+	Text,
 	matchesKey,
 	truncateToWidth,
 	type Component,
@@ -138,6 +139,17 @@ class BtwPanel implements Component, Focusable {
 		this.opts.tui.requestRender();
 	}
 
+	/** 流式期间的纯文本快速渲染:不跑 Markdown 解析,逐字顺滑;完成后由 renderMarkdown 精排接管 */
+	private renderPlain(text: string, width: number): string[] {
+		const key = `plain:${width}:${text.length}`;
+		const cached = this.mdCache.get(key);
+		if (cached) return cached;
+		const lines = new Text(text, 0, 0).render(width);
+		if (this.mdCache.size > 40) this.mdCache.clear();
+		this.mdCache.set(key, lines);
+		return lines;
+	}
+
 	private renderMarkdown(text: string, width: number): string[] {
 		const key = `${width}:${text.length}:${text.slice(0, 64)}`;
 		const cached = this.mdCache.get(key);
@@ -163,7 +175,7 @@ class BtwPanel implements Component, Focusable {
 		}
 		if (state.streaming) {
 			if (state.partial) {
-				lines.push(...this.renderMarkdown(state.partial, width));
+				lines.push(...this.renderPlain(state.partial, width));
 			} else {
 				// thinking 模型:思考阶段让面板"活"起来(耗时 + 思考量随 thinking_delta 实时刷新)
 				const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
