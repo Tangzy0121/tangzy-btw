@@ -45,9 +45,13 @@ interface SideState {
 	busyNotice: boolean;
 	/** 流式回退提示只发一次 */
 	fallbackNotified: boolean;
+	/** 流式中的思考文本(thinking 模型,仅用于进度展示,不入答案) */
+	thinking: string;
+	/** 本轮发问起点(渲染耗时用) */
+	startedAt: number;
 }
 
-const state: SideState = { turns: [], streaming: false, partial: "", busyNotice: false, fallbackNotified: false };
+const state: SideState = { turns: [], streaming: false, partial: "", busyNotice: false, fallbackNotified: false, thinking: "", startedAt: 0 };
 /** 面板固定 chrome 行数:上下边框 + 头部 + 输入行 + 提示行 */
 const CHROME_ROWS = 6;
 /** 历史区最少可见行数 */
@@ -150,14 +154,22 @@ class BtwPanel implements Component, Focusable {
 		for (const turn of state.turns) {
 			// 用户问题走纯文本渲染,防注入(Kimi 评审教训)
 			lines.push(th.fg("accent", `› ${turn.question}`));
-			const note = turn.aborted ? " [已中止]" : turn.error ? " [出错]" : "";
+			let note = "";
+			if (turn.aborted) note = " [已中止]";
+			else if (turn.error) note = " [出错]";
 			if (note) lines.push(th.fg("warning", note.trim()));
 			lines.push(...this.renderMarkdown(turn.answer, width));
 			lines.push("");
 		}
 		if (state.streaming) {
-			lines.push(th.fg("muted", "回答中…"));
-			if (state.partial) lines.push(...this.renderMarkdown(state.partial, width));
+			if (state.partial) {
+				lines.push(...this.renderMarkdown(state.partial, width));
+			} else {
+				// thinking 模型:思考阶段让面板"活"起来(耗时 + 思考量随 thinking_delta 实时刷新)
+				const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
+				const thinkNote = state.thinking ? ` · 已思考 ${state.thinking.length} 字` : "";
+				lines.push(th.fg("muted", `🤔 思考中… ${secs}s${thinkNote}`));
+			}
 		}
 		if (state.turns.length === 0 && !state.streaming) {
 			lines.push(th.fg("muted", "侧问不打扰主会话:直接在下方输入问题,Enter 发送。"));
@@ -253,6 +265,8 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 	}
 	state.streaming = true;
 	state.partial = "";
+	state.thinking = "";
+	state.startedAt = Date.now();
 	state.abort = new AbortController();
 	const requestRender = throttledRenderer(tui);
 	try {
@@ -277,6 +291,9 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 					for await (const ev of stream as any) {
 						if (ev?.type === "text_delta" && typeof ev.delta === "string") {
 							state.partial += ev.delta;
+							requestRender();
+						} else if (ev?.type === "thinking_delta" && typeof ev.delta === "string") {
+							state.thinking += ev.delta;
 							requestRender();
 						}
 					}
@@ -323,6 +340,8 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 	} finally {
 		state.streaming = false;
 		state.partial = "";
+		state.thinking = "";
+		state.startedAt = 0;
 		state.abort = undefined;
 		tui.requestRender();
 	}
@@ -342,6 +361,8 @@ export default function (pi: ExtensionAPI) {
 			if (q === "clear") {
 				state.abort?.abort();
 				state.turns.length = 0;
+				state.thinking = "";
+				state.startedAt = 0;
 				ctx.ui.notify("btw 侧线已清空", "info");
 				return;
 			}

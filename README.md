@@ -1,5 +1,9 @@
 # tangzy-btw
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![pi package](https://img.shields.io/badge/pi-package-brightgreen)](https://pi.dev/packages)
+[![tests](https://img.shields.io/badge/node--test-12%2F12%20passing-success)](extensions/tangzy-btw/lib.test.ts)
+
 A KimiCode-style `/btw` side-question extension for [pi](https://github.com/earendil-works/pi-coding-agent). Ask a quick side question without interrupting your main session — the answer streams into a bottom overlay panel with full markdown rendering, and nothing ever touches your main transcript.
 
 ## Why
@@ -20,6 +24,7 @@ Design inspired by KimiCode's side-question feature ([MoonshotAI/kimi-cli PR #17
 - **Never pollutes the main transcript** — the side thread lives in process memory only and is gone on exit
 - `/btw clear` — wipe the side-thread history
 - `Esc` closes the panel (aborting any in-flight answer); `↑`/`↓` (and PgUp/PgDn) scroll long answers
+- Live thinking progress (elapsed time + thinking volume) while reasoning models think — the panel never looks frozen
 - Pure logic lives in `extensions/tangzy-btw/lib.ts` and is covered by `node --test` unit tests
 
 ## Install
