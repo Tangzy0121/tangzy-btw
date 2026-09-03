@@ -17,7 +17,6 @@ import {
 	Input,
 	Key,
 	Markdown,
-	Text,
 	matchesKey,
 	truncateToWidth,
 	type Component,
@@ -139,23 +138,25 @@ class BtwPanel implements Component, Focusable {
 		this.opts.tui.requestRender();
 	}
 
-	/** 流式期间的纯文本快速渲染:不跑 Markdown 解析,逐字顺滑;完成后由 renderMarkdown 精排接管 */
-	private renderPlain(text: string, width: number): string[] {
-		const key = `plain:${width}:${text.length}`;
-		const cached = this.mdCache.get(key);
-		if (cached) return cached;
-		const lines = new Text(text, 0, 0).render(width);
-		if (this.mdCache.size > 40) this.mdCache.clear();
-		this.mdCache.set(key, lines);
-		return lines;
+	/** 流式期间未闭合的 ``` 代码栅栏会让 Markdown 解析器把后半截全吞成代码,补一个 closing fence 再渲染 */
+	private closeUnclosedFences(text: string): string {
+		const fences = text.match(/^```/gm);
+		if (fences && fences.length % 2 === 1) return text + "\n```";
+		return text;
+	}
+
+	/** 流式渲染:与 pi 主会话同套路——每帧 new Markdown(不缓存,padding=1,trim,补未闭合 fence) */
+	private renderMarkdownLive(text: string, width: number): string[] {
+		return new Markdown(this.closeUnclosedFences(text.trim()), 1, 0, this.mdTheme).render(width);
 	}
 
 	private renderMarkdown(text: string, width: number): string[] {
-		const key = `${width}:${text.length}:${text.slice(0, 64)}`;
+		const key = `${width}:${text.length}:${text.slice(0, 48)}:${text.slice(-48)}`;
 		const cached = this.mdCache.get(key);
 		if (cached) return cached;
-		const lines = new Markdown(text, 0, 0, this.mdTheme).render(width);
-		if (this.mdCache.size > 40) this.mdCache.clear();
+		const lines = new Markdown(text.trim(), 1, 0, this.mdTheme).render(width);
+		// LRU 逐出最旧一条;绝不能整体 clear(流式帧会反复把历史答案的精排缓存全冲掉→周期性卡顿)
+		if (this.mdCache.size > 60) this.mdCache.delete(this.mdCache.keys().next().value as string);
 		this.mdCache.set(key, lines);
 		return lines;
 	}
@@ -175,7 +176,7 @@ class BtwPanel implements Component, Focusable {
 		}
 		if (state.streaming) {
 			if (state.partial) {
-				lines.push(...this.renderPlain(state.partial, width));
+				lines.push(...this.renderMarkdownLive(state.partial, width));
 			} else {
 				// thinking 模型:思考阶段让面板"活"起来(耗时 + 思考量随 thinking_delta 实时刷新)
 				const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
