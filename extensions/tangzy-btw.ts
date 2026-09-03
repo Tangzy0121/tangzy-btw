@@ -39,19 +39,13 @@ interface SideState {
 	turns: SideTurn[];
 	streaming: boolean;
 	abort?: AbortController;
-	/** 流式中的部分答案 */
-	partial: string;
 	/** busy 提示的一次性标记(渲染后清除) */
 	busyNotice: boolean;
-	/** 流式回退提示只发一次 */
-	fallbackNotified: boolean;
-	/** 流式中的思考文本(thinking 模型,仅用于进度展示,不入答案) */
-	thinking: string;
 	/** 本轮发问起点(渲染耗时用) */
 	startedAt: number;
 }
 
-const state: SideState = { turns: [], streaming: false, partial: "", busyNotice: false, fallbackNotified: false, thinking: "", startedAt: 0 };
+const state: SideState = { turns: [], streaming: false, busyNotice: false, startedAt: 0 };
 /** 面板固定 chrome 行数:上下边框 + 头部 + 输入行 + 提示行 */
 const CHROME_ROWS = 6;
 /** 历史区最少可见行数 */
@@ -145,17 +139,12 @@ class BtwPanel implements Component, Focusable {
 		return text;
 	}
 
-	/** 流式渲染:与 pi 主会话同套路——每帧 new Markdown(不缓存,padding=1,trim,补未闭合 fence) */
-	private renderMarkdownLive(text: string, width: number): string[] {
-		return new Markdown(this.closeUnclosedFences(text.trim()), 1, 0, this.mdTheme).render(width);
-	}
-
 	private renderMarkdown(text: string, width: number): string[] {
 		const key = `${width}:${text.length}:${text.slice(0, 48)}:${text.slice(-48)}`;
 		const cached = this.mdCache.get(key);
 		if (cached) return cached;
-		const lines = new Markdown(text.trim(), 1, 0, this.mdTheme).render(width);
-		// LRU 逐出最旧一条;绝不能整体 clear(流式帧会反复把历史答案的精排缓存全冲掉→周期性卡顿)
+		const lines = new Markdown(this.closeUnclosedFences(text.trim()), 1, 0, this.mdTheme).render(width);
+		// LRU 逐出最旧一条;不整体 clear(历史上整体 clear 曾把历史答案精排缓存全冲掉)
 		if (this.mdCache.size > 60) this.mdCache.delete(this.mdCache.keys().next().value as string);
 		this.mdCache.set(key, lines);
 		return lines;
@@ -175,14 +164,9 @@ class BtwPanel implements Component, Focusable {
 			lines.push("");
 		}
 		if (state.streaming) {
-			if (state.partial) {
-				lines.push(...this.renderMarkdownLive(state.partial, width));
-			} else {
-				// thinking 模型:思考阶段让面板"活"起来(耗时 + 思考量随 thinking_delta 实时刷新)
-				const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
-				const thinkNote = state.thinking ? ` · 已思考 ${state.thinking.length} 字` : "";
-				lines.push(th.fg("muted", `🤔 思考中… ${secs}s${thinkNote}`));
-			}
+			// 整段模式:等待指示器由 500ms 心跳驱动刷新,Esc 可中止
+			const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
+			lines.push(th.fg("muted", `🤔 思考中… ${secs}s(Esc 中止)`));
 		}
 		if (state.turns.length === 0 && !state.streaming) {
 			lines.push(th.fg("muted", "侧问不打扰主会话:直接在下方输入问题,Enter 发送。"));
@@ -224,41 +208,6 @@ class BtwPanel implements Component, Focusable {
 
 // ---------- 侧问调用 ----------
 
-/** 流式节流渲染(V2 恢复):100ms 间隔 */
-function throttledRenderer(tui: TUI): () => void {
-	let last = 0;
-	return () => {
-		const now = Date.now();
-		if (now - last >= 100) {
-			last = now;
-			tui.requestRender();
-		}
-	};
-}
-
-/** pi-ai compat 子路径的 streamSimple 自由函数(扩展可用的唯一流式路径) */
-type StreamSimpleFn = (model: any, context: any, options?: any) => AsyncIterable<any> & { result(): Promise<any> };
-let streamSimpleProbe: "unknown" | "ok" | "fail" = "unknown";
-let streamSimpleFn: StreamSimpleFn | undefined;
-
-/** 探针:动态 import pi-ai/compat,失败则本会话永久回退 complete 整段模式 */
-async function ensureStreamSimple(): Promise<StreamSimpleFn | undefined> {
-	if (streamSimpleProbe === "ok") return streamSimpleFn;
-	if (streamSimpleProbe === "fail") return undefined;
-	try {
-		const mod: any = await import("@earendil-works/pi-ai/compat");
-		if (typeof mod?.streamSimple === "function") {
-			streamSimpleFn = mod.streamSimple as StreamSimpleFn;
-			streamSimpleProbe = "ok";
-			return streamSimpleFn;
-		}
-	} catch {
-		/* 解析失败,落入 fail */
-	}
-	streamSimpleProbe = "fail";
-	return undefined;
-}
-
 /** token 估算:优先 pi 官方 estimateTokens(接收消息对象,这里做适配),异常回退字符估算 */
 function makeTokenEstimator(): (text: string) => number {
 	return (text: string) => {
@@ -277,68 +226,28 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 		return;
 	}
 	state.streaming = true;
-	state.partial = "";
-	state.thinking = "";
 	state.startedAt = Date.now();
 	state.abort = new AbortController();
-	const requestRender = throttledRenderer(tui);
+	// 整段模式(2026-09-04 用户拍板砍流式):500ms 心跳驱动等待指示器计时刷新
+	const ticker = setInterval(() => tui.requestRender(), 500);
 	try {
 		const packed = packContext(extractMessages(ctx.sessionManager.getBranch()), DEFAULT_CONTEXT_TOKEN_BUDGET, makeTokenEstimator());
 		const messages = buildMessages(packed, state.turns, question).map((m) => ({ ...m, timestamp: Date.now() }));
 		const context = { systemPrompt: SIDE_SYSTEM_PROMPT, messages: messages as any };
-		let final: any;
-
-		// V2:优先流式(pi-ai/compat streamSimple),失败回退 complete 整段模式
-		const fn = await ensureStreamSimple();
-		let streamed = false;
-		if (fn) {
-			try {
-				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-				if (auth.ok) {
-					const stream = fn(model, context, {
-						signal: state.abort.signal,
-						reasoning: ctx.thinkingLevel as any,
-						apiKey: auth.apiKey,
-						headers: (auth as any).headers,
-					});
-					for await (const ev of stream as any) {
-						if (ev?.type === "text_delta" && typeof ev.delta === "string") {
-							state.partial += ev.delta;
-							requestRender();
-						} else if (ev?.type === "thinking_delta" && typeof ev.delta === "string") {
-							state.thinking += ev.delta;
-							requestRender();
-						}
-					}
-					final = await stream.result();
-					streamed = true;
-				}
-			} catch (e) {
-				if (state.abort?.signal.aborted) throw e; // 用户中止走外层,不回退
-				// 流式路径失败:回退(保留已累积的 partial 作为兜底答案)
-				streamSimpleProbe = "fail";
-			}
-		}
-		if (!streamed) {
-			if (fn && !state.fallbackNotified) {
-				state.fallbackNotified = true;
-				ctx.ui.notify("btw: 流式不可用,已回退整段模式", "info");
-			}
-			final = await ctx.modelRegistry.complete(model, context, {
-				signal: state.abort.signal,
-				reasoning: ctx.thinkingLevel as any,
-			});
-		}
+		const final = await ctx.modelRegistry.complete(model, context, {
+			signal: state.abort.signal,
+			reasoning: ctx.thinkingLevel as any,
+		});
 
 		// 混合 text+tool 响应:只采纳文本块(Kimi 评审教训)
 		const textParts = (final.content as Array<{ type: string; text?: string }>)
 			.filter((c) => c.type === "text" && typeof c.text === "string")
 			.map((c) => c.text as string);
 		const hadToolCalls = (final.content as Array<{ type: string }>).some((c) => c.type === "toolCall");
-		let answer = textParts.join("\n") || state.partial || "(无文本输出)";
+		let answer = textParts.join("\n") || "(无文本输出)";
 		if (hadToolCalls) answer += "\n\n*(模型尝试调用工具,已忽略——侧问不执行任何操作)*";
 		if (final.stopReason === "aborted") {
-			state.turns.push({ question, answer: state.partial || "(无输出)", aborted: true });
+			state.turns.push({ question, answer: "(无输出)", aborted: true });
 		} else if (final.stopReason === "error") {
 			state.turns.push({ question, answer: `出错:${(final as any).errorMessage ?? "未知错误"}`, error: true });
 		} else {
@@ -346,14 +255,13 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 		}
 	} catch (e) {
 		if (state.abort?.signal.aborted) {
-			state.turns.push({ question, answer: state.partial || "(无输出)", aborted: true });
+			state.turns.push({ question, answer: "(无输出)", aborted: true });
 		} else {
 			state.turns.push({ question, answer: `出错:${e instanceof Error ? e.message : String(e)}`, error: true });
 		}
 	} finally {
+		clearInterval(ticker);
 		state.streaming = false;
-		state.partial = "";
-		state.thinking = "";
 		state.startedAt = 0;
 		state.abort = undefined;
 		tui.requestRender();
@@ -374,7 +282,6 @@ export default function (pi: ExtensionAPI) {
 			if (q === "clear") {
 				state.abort?.abort();
 				state.turns.length = 0;
-				state.thinking = "";
 				state.startedAt = 0;
 				ctx.ui.notify("btw 侧线已清空", "info");
 				return;
