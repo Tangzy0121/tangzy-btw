@@ -25,6 +25,7 @@ Design inspired by KimiCode's side-question feature ([MoonshotAI/kimi-cli PR #17
 - Read-only snapshot of your main session (branch messages packed under a ~20k token budget) so the side answer knows what you're working on
 - **Never pollutes the main transcript** — the side thread lives in process memory only and is gone on exit
 - `/btw clear` — wipe the side-thread history
+- **Bilingual UI (English/中文)** — auto-detected from `LANG`/`LC_ALL` (default English, matching pi itself); `/btw lang zh|en|auto` overrides and persists to `~/.pi/agent/tangzy-btw.json`. Answers follow the question's language automatically
 - `Esc` closes the panel (aborting any in-flight answer); `↑`/`↓` (and PgUp/PgDn) scroll long answers
 - Live waiting indicator (elapsed seconds, `Esc` to abort) while the model thinks — the panel never looks frozen. Answers are delivered one-shot rather than token-streamed, by design: with reasoning models the stream arrives as one burst anyway
 - Pure logic lives in `extensions/tangzy-btw/lib.ts` and is covered by `node --test` unit tests
@@ -48,6 +49,7 @@ Restart pi, then type `/btw <your question>` in the main input.
 | `↑` / `↓` / `PgUp` / `PgDn` | Scroll the answer |
 | `Esc` | Close the panel (aborts any in-flight answer) |
 | `/btw clear` | Clear side-thread history |
+| `/btw lang zh\|en\|auto` | Switch UI language (persisted) |
 
 ## Development
 
