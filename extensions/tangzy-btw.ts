@@ -24,6 +24,9 @@ import {
 	type Focusable,
 	type TUI,
 } from "@earendil-works/pi-tui";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import {
 	buildMessages,
 	charTokenEstimate,
@@ -47,6 +50,88 @@ interface SideState {
 }
 
 const state: SideState = { turns: [], streaming: false, busyNotice: false, startedAt: 0 };
+
+// ---------- i18n 中英双语:auto = LANG/LC_ALL 环境检测(默认 en);/btw lang zh|en|auto 覆盖并持久化到 ~/.pi/agent/tangzy-btw.json ----------
+
+type Lang = "zh" | "en";
+
+const STRINGS = {
+	en: {
+		cmdDesc: "Side question: quick Q&A without touching the main session (bottom panel, markdown, follow-ups; /btw clear, /btw lang zh 中文)",
+		welcome: "Ask away — this side thread never touches your main session. Type below, Enter to send.",
+		thinking: (s: number) => `🤔 thinking… ${s}s (Esc to abort)`,
+		header: (turns: string, modelId: string) => ` btw · side · turn ${turns} · ${modelId}`,
+		scrollUp: (n: number) => ` (↑↓ scroll · ${n} lines from bottom)`,
+		scrollBottom: " (↑↓ scroll · at bottom)",
+		busy: " answering, hold on…",
+		hints: " Enter send · Esc close · /btw clear reset · /btw lang zh 中文",
+		noteAborted: "[aborted]",
+		noteError: "[error]",
+		noOutput: "(no output)",
+		noText: "(no text output)",
+		toolIgnored: "\n\n*(the model tried to call tools — ignored; side questions never execute anything)*",
+		errPrefix: "Error: ",
+		unknownError: "unknown error",
+		noModel: "btw: no model available",
+		tuiOnly: "btw is interactive-mode only",
+		cleared: "btw side thread cleared",
+		langNow: (l: string) => `btw language: ${l}`,
+		langSet: (l: string) => `btw language: ${l} (saved)`,
+	},
+	zh: {
+		cmdDesc: "侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空,/btw lang en English)",
+		welcome: "侧问不打扰主会话:直接在下方输入问题,Enter 发送。",
+		thinking: (s: number) => `🤔 思考中… ${s}s(Esc 中止)`,
+		header: (turns: string, modelId: string) => ` btw · 侧问 · 第 ${turns} 轮 · ${modelId}`,
+		scrollUp: (n: number) => ` (↑↓ 滚动 · 距底部 ${n} 行)`,
+		scrollBottom: " (↑↓ 滚动 · 已吸底)",
+		busy: " 回答中,稍等…",
+		hints: " Enter 发送 · Esc 关闭 · /btw clear 清空 · /btw lang en English",
+		noteAborted: "[已中止]",
+		noteError: "[出错]",
+		noOutput: "(无输出)",
+		noText: "(无文本输出)",
+		toolIgnored: "\n\n*(模型尝试调用工具,已忽略——侧问不执行任何操作)*",
+		errPrefix: "出错:",
+		unknownError: "未知错误",
+		noModel: "btw: 当前没有可用模型",
+		tuiOnly: "btw 仅支持交互模式",
+		cleared: "btw 侧线已清空",
+		langNow: (l: string) => `btw 界面语言:${l}`,
+		langSet: (l: string) => `btw 界面语言已切换为 ${l}(已保存)`,
+	},
+} as const;
+
+type Strings = (typeof STRINGS)["en"];
+
+function detectLang(): Lang {
+	const v = `${process.env.LANG ?? ""} ${process.env.LC_ALL ?? ""} ${process.env.LANGUAGE ?? ""}`.toLowerCase();
+	return v.includes("zh") ? "zh" : "en";
+}
+
+const LANG_FILE = join(homedir(), ".pi", "agent", "tangzy-btw.json");
+
+function loadLang(): Lang {
+	try {
+		const raw = JSON.parse(readFileSync(LANG_FILE, "utf-8")) as { lang?: string };
+		if (raw.lang === "zh" || raw.lang === "en") return raw.lang;
+	} catch {
+		return detectLang(); // 无配置或损坏 → 自动检测
+	}
+	return detectLang();
+}
+
+function saveLang(lang: Lang | "auto"): void {
+	try {
+		mkdirSync(dirname(LANG_FILE), { recursive: true });
+		writeFileSync(LANG_FILE, JSON.stringify(lang === "auto" ? {} : { lang }), "utf-8");
+	} catch {
+		return; // 持久化失败不致命
+	}
+}
+
+let uiLang: Lang = loadLang();
+const S = (): Strings => STRINGS[uiLang];
 /** 面板固定 chrome 行数:上下边框 + 头部 + 输入行 + 提示行 */
 const CHROME_ROWS = 6;
 /** 历史区最少可见行数 */
@@ -162,8 +247,8 @@ class BtwPanel implements Component, Focusable {
 				lines.push(th.fg("accent", th.bold((i === 0 ? "● " : "  ") + qline)));
 			});
 			let note = "";
-			if (turn.aborted) note = " [已中止]";
-			else if (turn.error) note = " [出错]";
+			if (turn.aborted) note = S().noteAborted;
+			else if (turn.error) note = S().noteError;
 			if (note) lines.push(th.fg("warning", note.trim()));
 			lines.push("");
 			lines.push(...this.renderMarkdown(turn.answer, width));
@@ -172,10 +257,10 @@ class BtwPanel implements Component, Focusable {
 		if (state.streaming) {
 			// 整段模式:等待指示器由 500ms 心跳驱动刷新,Esc 可中止
 			const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
-			lines.push(th.fg("muted", `🤔 思考中… ${secs}s(Esc 中止)`));
+			lines.push(th.fg("muted", S().thinking(secs)));
 		}
 		if (state.turns.length === 0 && !state.streaming) {
-			lines.push(th.fg("muted", "侧问不打扰主会话:直接在下方输入问题,Enter 发送。"));
+			lines.push(th.fg("muted", S().welcome));
 		}
 		return lines;
 	}
@@ -193,11 +278,12 @@ class BtwPanel implements Component, Focusable {
 		const start = Math.max(0, all.length - rows - this.scrollUp);
 		const visible = all.slice(start, start + rows);
 
-		const header = ` btw · 侧问 · 第 ${state.turns.length}${state.streaming ? "+" : ""} 轮 · ${this.opts.modelId}`;
-		const scrollHint = maxScroll > 0 ? ` (↑↓ 滚动 ${this.scrollUp > 0 ? `· 距底部 ${this.scrollUp} 行` : "· 已吸底"})` : "";
-		const busy = state.busyNotice ? th.fg("warning", " 回答中,稍等…") : "";
+		const header = S().header(`${state.turns.length}${state.streaming ? "+" : ""}`, this.opts.modelId);
+		let scrollHint = "";
+		if (maxScroll > 0) scrollHint = this.scrollUp > 0 ? S().scrollUp(this.scrollUp) : S().scrollBottom;
+		const busy = state.busyNotice ? th.fg("warning", S().busy) : "";
 		state.busyNotice = false;
-		const hints = ` Enter 发送 · Esc 关闭 · /btw clear 清空${scrollHint}`;
+		const hints = `${S().hints}${scrollHint}`;
 
 		const lines: string[] = [];
 		lines.push(border(`╭${"─".repeat(innerW)}╮`));
@@ -228,7 +314,7 @@ function makeTokenEstimator(): (text: string) => number {
 async function runSideQuestion(ctx: ExtensionCommandContext, question: string, tui: TUI): Promise<void> {
 	const model = ctx.model;
 	if (!model) {
-		ctx.ui.notify("btw: 当前没有可用模型", "error");
+		ctx.ui.notify(S().noModel, "error");
 		return;
 	}
 	state.streaming = true;
@@ -250,20 +336,20 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 			.filter((c) => c.type === "text" && typeof c.text === "string")
 			.map((c) => c.text as string);
 		const hadToolCalls = (final.content as Array<{ type: string }>).some((c) => c.type === "toolCall");
-		let answer = textParts.join("\n") || "(无文本输出)";
-		if (hadToolCalls) answer += "\n\n*(模型尝试调用工具,已忽略——侧问不执行任何操作)*";
+		let answer = textParts.join("\n") || S().noText;
+		if (hadToolCalls) answer += S().toolIgnored;
 		if (final.stopReason === "aborted") {
-			state.turns.push({ question, answer: "(无输出)", aborted: true });
+			state.turns.push({ question, answer: S().noOutput, aborted: true });
 		} else if (final.stopReason === "error") {
-			state.turns.push({ question, answer: `出错:${(final as any).errorMessage ?? "未知错误"}`, error: true });
+			state.turns.push({ question, answer: `${S().errPrefix}${(final as any).errorMessage ?? S().unknownError}`, error: true });
 		} else {
 			state.turns.push({ question, answer });
 		}
 	} catch (e) {
 		if (state.abort?.signal.aborted) {
-			state.turns.push({ question, answer: "(无输出)", aborted: true });
+			state.turns.push({ question, answer: S().noOutput, aborted: true });
 		} else {
-			state.turns.push({ question, answer: `出错:${e instanceof Error ? e.message : String(e)}`, error: true });
+			state.turns.push({ question, answer: `${S().errPrefix}${e instanceof Error ? e.message : String(e)}`, error: true });
 		}
 	} finally {
 		clearInterval(ticker);
@@ -278,22 +364,38 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("btw", {
-		description: "侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空)",
+		description: S().cmdDesc,
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") {
-				ctx.ui.notify("btw 仅支持交互模式", "error");
+				ctx.ui.notify(S().tuiOnly, "error");
 				return;
 			}
 			const q = (args ?? "").trim();
+			const langArg = q.match(/^lang(?:\s+(zh|en|auto))?$/i);
+			if (langArg) {
+				const target = (langArg[1] ?? "").toLowerCase();
+				if (!target) {
+					ctx.ui.notify(S().langNow(uiLang), "info");
+				} else if (target === "auto") {
+					uiLang = detectLang();
+					saveLang("auto");
+					ctx.ui.notify(S().langSet(`auto → ${uiLang}`), "info");
+				} else {
+					uiLang = target as Lang;
+					saveLang(uiLang);
+					ctx.ui.notify(S().langSet(uiLang), "info");
+				}
+				return;
+			}
 			if (q === "clear") {
 				state.abort?.abort();
 				state.turns.length = 0;
 				state.startedAt = 0;
-				ctx.ui.notify("btw 侧线已清空", "info");
+				ctx.ui.notify(S().cleared, "info");
 				return;
 			}
 			if (!ctx.model) {
-				ctx.ui.notify("btw: 当前没有可用模型", "error");
+				ctx.ui.notify(S().noModel, "error");
 				return;
 			}
 
