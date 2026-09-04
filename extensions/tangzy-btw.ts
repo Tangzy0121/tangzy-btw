@@ -82,7 +82,7 @@ const STRINGS = {
 		scrollUp: (n: number) => ` (↑↓ scroll · ${n} lines from bottom)`,
 		scrollBottom: " (↑↓ scroll · at bottom)",
 		busy: " answering, hold on…",
-		hints: " Enter send · Esc close · Ctrl/Alt+←/→ convos",
+		hints: " Enter send · Esc close · Alt+←/→ convos · Alt+↑/↓ turns",
 		newConvo: "btw: new conversation started",
 		historyTitle: "btw conversations",
 		emptyTag: "(empty)",
@@ -107,7 +107,7 @@ const STRINGS = {
 		scrollUp: (n: number) => ` (↑↓ 滚动 · 距底部 ${n} 行)`,
 		scrollBottom: " (↑↓ 滚动 · 已吸底)",
 		busy: " 回答中,稍等…",
-		hints: " Enter 发送 · Esc 关闭 · Ctrl/Alt+←/→ 切对话",
+		hints: " Enter 发送 · Esc 关闭 · Alt+←/→ 对话 · Alt+↑/↓ 轮次",
 		newConvo: "btw:已开新对话",
 		historyTitle: "btw 侧问对话",
 		emptyTag: "(空对话)",
@@ -184,6 +184,12 @@ class BtwPanel implements Component, Focusable {
 	private scrollUp = 0;
 	/** 最新一轮在 contentLines 里的起始行(答案完成后定位到开头用) */
 	private lastTurnStart = 0;
+	/** 每一轮的起始行(Alt+↑/↓ 轮次跳转用) */
+	private turnStarts: number[] = [];
+	/** 上一帧渲染的总量:总行数/可见行数/视口顶行(jumpTurn 计算用) */
+	private lastTotal = 0;
+	private lastRows = 0;
+	private viewTop = 0;
 	private _focused = true;
 
 	get focused(): boolean {
@@ -249,6 +255,15 @@ class BtwPanel implements Component, Focusable {
 			this.switchConvo(1);
 			return;
 		}
+		// Alt+↑/↓ 按轮次跳转(落在那一轮的问题开头);Alt 已被 Warp 验证可转发
+		if (matchesKey(data, Key.alt("up"))) {
+			this.jumpTurn(-1);
+			return;
+		}
+		if (matchesKey(data, Key.alt("down"))) {
+			this.jumpTurn(1);
+			return;
+		}
 		this.input.handleInput(data);
 		this.opts.tui.requestRender();
 	}
@@ -260,6 +275,33 @@ class BtwPanel implements Component, Focusable {
 		state.active = (state.active + dir + n) % n;
 		state.seekLatestTurn = false;
 		this.scrollToTop();
+	}
+
+	/** Alt+↑/↓ 按轮次跳转:目标轮次的问题行置顶;到顶/到底就不动 */
+	private jumpTurn(dir: number): void {
+		const starts = this.turnStarts;
+		if (starts.length === 0) return;
+		let target: number | undefined;
+		if (dir < 0) {
+			for (let i = starts.length - 1; i >= 0; i--) {
+				const s = starts[i] ?? 0;
+				if (s < this.viewTop - 1) {
+					target = s;
+					break;
+				}
+			}
+		} else {
+			for (const s of starts) {
+				if (s > this.viewTop + 1) {
+					target = s;
+					break;
+				}
+			}
+		}
+		if (target === undefined) return;
+		state.seekLatestTurn = false;
+		this.scrollUp = Math.max(0, this.lastTotal - this.lastRows - target);
+		this.opts.tui.requestRender();
 	}
 
 	/** 定位到内容顶部(scrollUp 会在 render 里被 clamp 到 maxScroll) */
@@ -289,8 +331,10 @@ class BtwPanel implements Component, Focusable {
 	private contentLines(width: number): string[] {
 		const th = this.opts.theme;
 		const lines: string[] = [];
+		this.turnStarts = [];
 		const convo = activeConvo();
 		convo.turns.forEach((turn, i) => {
+			this.turnStarts.push(lines.length);
 			if (i === convo.turns.length - 1) this.lastTurnStart = lines.length;
 			// 用户问题走纯文本渲染,防注入(Kimi 评审教训);● 标记+accent 粗体+悬挂缩进,问答之间空行分隔
 			if (lines.length > 0) lines.push(th.fg("dim", "┄".repeat(Math.max(4, width))));
@@ -334,9 +378,17 @@ class BtwPanel implements Component, Focusable {
 		this.scrollUp = Math.min(this.scrollUp, maxScroll);
 		const start = Math.max(0, all.length - rows - this.scrollUp);
 		const visible = all.slice(start, start + rows);
-
+		// 记录渲染量,供 jumpTurn(Alt+↑/↓)计算目标轮次
+		this.lastTotal = all.length;
+		this.lastRows = rows;
+		this.viewTop = start;
 		const convoTag = state.convos.length > 1 ? ` · #${state.active + 1}/${state.convos.length}` : "";
-		const header = S().header(`${activeConvo().turns.length}${state.streaming ? "+" : ""}`, this.opts.modelId) + convoTag;
+		// 表头显示视口顶所在的轮次:第 当前/总数 轮
+		const total = activeConvo().turns.length;
+		let cur = 0;
+		for (const s of this.turnStarts) if (s <= this.viewTop) cur += 1;
+		const turnStr = total === 0 ? "0" : `${Math.max(1, cur)}/${total}`;
+		const header = S().header(`${turnStr}${state.streaming ? "+" : ""}`, this.opts.modelId) + convoTag;
 		let scrollHint = "";
 		if (maxScroll > 0) scrollHint = this.scrollUp > 0 ? S().scrollUp(this.scrollUp) : S().scrollBottom;
 		const busy = state.busyNotice ? th.fg("warning", S().busy) : "";
