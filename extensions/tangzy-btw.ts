@@ -136,7 +136,7 @@ class BtwPanel implements Component, Focusable {
 	/** 流式期间未闭合的 ``` 代码栅栏会让 Markdown 解析器把后半截全吞成代码,补一个 closing fence 再渲染 */
 	private closeUnclosedFences(text: string): string {
 		const fences = text.match(/^```/gm);
-		if (fences && fences.length % 2 === 1) return text + "\n```";
+		if (fences && fences.length % 2 === 1) return `${text}\n\`\`\``;
 		return text;
 	}
 
@@ -155,15 +155,17 @@ class BtwPanel implements Component, Focusable {
 		const th = this.opts.theme;
 		const lines: string[] = [];
 		for (const turn of state.turns) {
-			// 用户问题走纯文本渲染,防注入(Kimi 评审教训);粗体+accent+虚线分隔,一眼区分轮次
+			// 用户问题走纯文本渲染,防注入(Kimi 评审教训);● 标记+accent 粗体+悬挂缩进,问答之间空行分隔
 			if (lines.length > 0) lines.push(th.fg("dim", "┄".repeat(Math.max(4, width))));
-			for (const qline of new Text(`❯ ${turn.question}`, 0, 0).render(width)) {
-				lines.push(th.fg("accent", th.bold(qline)));
-			}
+			const qWrapped = new Text(turn.question, 0, 0).render(Math.max(8, width - 2));
+			qWrapped.forEach((qline, i) => {
+				lines.push(th.fg("accent", th.bold((i === 0 ? "● " : "  ") + qline)));
+			});
 			let note = "";
 			if (turn.aborted) note = " [已中止]";
 			else if (turn.error) note = " [出错]";
 			if (note) lines.push(th.fg("warning", note.trim()));
+			lines.push("");
 			lines.push(...this.renderMarkdown(turn.answer, width));
 			lines.push("");
 		}
