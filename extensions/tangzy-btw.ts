@@ -82,7 +82,7 @@ const STRINGS = {
 		scrollUp: (n: number) => ` (↑↓ scroll · ${n} lines from bottom)`,
 		scrollBottom: " (↑↓ scroll · at bottom)",
 		busy: " answering, hold on…",
-		hints: " Enter send · Esc close · Ctrl+←/→ convos · /btw lang zh 中文",
+		hints: " Enter send · Esc close · Ctrl/Alt+←/→ convos",
 		newConvo: "btw: new conversation started",
 		historyTitle: "btw conversations",
 		emptyTag: "(empty)",
@@ -107,7 +107,7 @@ const STRINGS = {
 		scrollUp: (n: number) => ` (↑↓ 滚动 · 距底部 ${n} 行)`,
 		scrollBottom: " (↑↓ 滚动 · 已吸底)",
 		busy: " 回答中,稍等…",
-		hints: " Enter 发送 · Esc 关闭 · Ctrl+←/→ 切对话 · /btw lang en English",
+		hints: " Enter 发送 · Esc 关闭 · Ctrl/Alt+←/→ 切对话",
 		newConvo: "btw:已开新对话",
 		historyTitle: "btw 侧问对话",
 		emptyTag: "(空对话)",
@@ -240,11 +240,12 @@ class BtwPanel implements Component, Focusable {
 			this.opts.tui.requestRender();
 			return;
 		}
-		if (matchesKey(data, Key.ctrl("left"))) {
+		// Ctrl 在部分终端(如 Warp)被占作按词跳转不转发,Alt 双保险
+		if (matchesKey(data, Key.ctrl("left")) || matchesKey(data, Key.alt("left"))) {
 			this.switchConvo(-1);
 			return;
 		}
-		if (matchesKey(data, Key.ctrl("right"))) {
+		if (matchesKey(data, Key.ctrl("right")) || matchesKey(data, Key.alt("right"))) {
 			this.switchConvo(1);
 			return;
 		}

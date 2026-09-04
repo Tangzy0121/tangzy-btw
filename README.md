@@ -53,7 +53,7 @@ Restart pi, then type `/btw <your question>` in the main input.
 | `/btw clear` | Clear the current conversation |
 | `/btw new` | Start a new side conversation |
 | `/btw history` | Pick a past conversation to review (opens at top) |
-| `Ctrl+←` / `Ctrl+→` in panel | Cycle conversations |
+| `Ctrl+←/→` or `Alt+←/→` in panel | Cycle conversations |
 | `/btw lang zh\|en\|auto` | Switch UI language (persisted) |
 
 ## Development
