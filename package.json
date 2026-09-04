@@ -2,15 +2,28 @@
   "name": "tangzy-btw",
   "version": "0.4.0",
   "description": "KimiCode-style /btw side-question extension for pi: bottom overlay panel, markdown answers, in-panel follow-ups, read-only main-session context.",
-  "keywords": ["pi-package", "pi-extension", "btw", "side-question"],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "btw",
+    "side-question"
+  ],
   "license": "MIT",
+  "files": [
+    "extensions",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "author": "Tangzy0121",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Tangzy0121/tangzy-btw"
+    "url": "git+https://github.com/Tangzy0121/tangzy-btw.git"
   },
   "pi": {
-    "extensions": ["./extensions"],
+    "extensions": [
+      "./extensions"
+    ],
     "image": "https://raw.githubusercontent.com/Tangzy0121/tangzy-btw/main/docs/screenshot.png"
   },
   "peerDependencies": {
