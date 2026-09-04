@@ -24,8 +24,8 @@ import {
 	type Focusable,
 	type TUI,
 } from "@earendil-works/pi-tui";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
 	buildMessages,
@@ -134,9 +134,6 @@ function detectLang(): Lang {
 }
 
 const LANG_FILE = join(homedir(), ".pi", "agent", "tangzy-btw.json");
-/** 临时诊断:转义序列键位日志(Warp Alt+↑/↓ 排查完即删) */
-const KEYLOG = join(tmpdir(), "btw-keys.log");
-let keylogBroken = false;
 
 function loadLang(): Lang {
 	try {
@@ -225,14 +222,6 @@ class BtwPanel implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
-		// 临时诊断(2026-09-04,Warp Alt+↑/↓ 失灵排查):只记录 ESC 开头的转义序列,不记录可打印文本
-		if (data.startsWith("\x1b")) {
-			try {
-				appendFileSync(KEYLOG, `${JSON.stringify(data)}\n`);
-			} catch {
-				keylogBroken = true; // 诊断日志失败不影响输入
-			}
-		}
 		if (matchesKey(data, Key.escape)) {
 			this.opts.onClose();
 			return;

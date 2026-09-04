@@ -44,19 +44,28 @@ Restart pi, then type `/btw <your question>` in the main input.
 
 ## Usage
 
-| Command / key | Action |
+### Commands
+
+| Command | Action |
 | --- | --- |
 | `/btw <question>` | Ask a side question (opens the panel) |
-| type + `Enter` in panel | Follow-up question with side-thread context |
-| `↑` / `↓` / `PgUp` / `PgDn` | Scroll the answer |
-| `Esc` | Close the panel (aborts any in-flight answer) |
-| `/btw clear` | Clear the current conversation |
 | `/btw new` | Start a new side conversation |
 | `/btw history` | Pick a past conversation to review (opens at top) |
-| `Alt+←/→` (or `Ctrl+←/→`) in panel | Cycle conversations |
-| `Ctrl+P` / `Ctrl+N` in panel | Jump to previous/next turn (lands on that turn's question) |
-| `Alt+↑/↓` in panel | Same, where the terminal forwards Alt+arrows |
+| `/btw clear` | Clear the current conversation |
 | `/btw lang zh\|en\|auto` | Switch UI language (persisted) |
+
+### Panel shortcuts
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Send the question (follow-ups keep the conversation as context) |
+| `Ctrl+P` | Jump to the **previous turn**, landed on that turn's question |
+| `Ctrl+N` | Jump to the **next turn** |
+| `Alt+←` / `Alt+→` | Previous / next **conversation** (`Ctrl+←/→` also works where the terminal forwards it) |
+| `↑` / `↓` / `PgUp` / `PgDn` | Scroll line by line / page by page |
+| `Esc` | Close the panel (aborts any in-flight answer) |
+
+Turn jumps land on the turn's question line so you read top-down. The header shows `turn current/total` plus `#n/N` when several conversations exist. `Alt+↑/↓` also jumps turns in terminals that forward Alt+arrows (Warp reserves them, so prefer `Ctrl+P/N` there).
 
 ## Development
 
