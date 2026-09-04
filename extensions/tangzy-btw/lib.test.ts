@@ -139,5 +139,6 @@ test("SIDE_SYSTEM_PROMPT: Kimi 式要点齐全", () => {
 	assert.ok(SIDE_SYSTEM_PROMPT.includes("没有任何工具"));
 	assert.ok(SIDE_SYSTEM_PROMPT.includes("不知道就直说"));
 	assert.ok(SIDE_SYSTEM_PROMPT.includes("只读"));
+	assert.ok(SIDE_SYSTEM_PROMPT.includes("Recap"));
 	assert.ok(SIDE_SYSTEM_PROMPT.includes("多轮追问"));
 });

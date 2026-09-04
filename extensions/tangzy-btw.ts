@@ -39,17 +39,35 @@ import {
 
 // ---------- 模块级侧线状态(进程内存,退出即焚) ----------
 
-interface SideState {
+/** 一条侧问对话:标题(先截断兜底,首答后模型生成摘要)+ 轮次 */
+interface SideConvo {
+	title: string;
 	turns: SideTurn[];
+	createdAt: number;
+}
+
+interface SideState {
+	convos: SideConvo[];
+	active: number;
 	streaming: boolean;
 	abort?: AbortController;
 	/** busy 提示的一次性标记(渲染后清除) */
 	busyNotice: boolean;
 	/** 本轮发问起点(渲染耗时用) */
 	startedAt: number;
+	/** 新答案到达后,下一帧渲染定位到最新一轮的开头(从上往下读),而非吸底 */
+	seekLatestTurn: boolean;
 }
 
-const state: SideState = { turns: [], streaming: false, busyNotice: false, startedAt: 0 };
+const state: SideState = { convos: [{ title: "", turns: [], createdAt: Date.now() }], active: 0, streaming: false, busyNotice: false, startedAt: 0, seekLatestTurn: false };
+
+function activeConvo(): SideConvo {
+	const c = state.convos[state.active];
+	if (c) return c;
+	state.convos[0] = { title: "", turns: [], createdAt: Date.now() };
+	state.active = 0;
+	return state.convos[0];
+}
 
 // ---------- i18n 中英双语:auto = LANG/LC_ALL 环境检测(默认 en);/btw lang zh|en|auto 覆盖并持久化到 ~/.pi/agent/tangzy-btw.json ----------
 
@@ -60,11 +78,14 @@ const STRINGS = {
 		cmdDesc: "Side question: quick Q&A without touching the main session (bottom panel, markdown, follow-ups; /btw clear, /btw lang zh 中文)",
 		welcome: "Ask away — this side thread never touches your main session. Type below, Enter to send.",
 		thinking: (s: number) => `🤔 thinking… ${s}s (Esc to abort)`,
-		header: (turns: string, modelId: string) => ` btw · side · turn ${turns} · ${modelId}`,
+		header: (turns: string, modelId: string) => ` btw · turn ${turns} · ${modelId}`,
 		scrollUp: (n: number) => ` (↑↓ scroll · ${n} lines from bottom)`,
 		scrollBottom: " (↑↓ scroll · at bottom)",
 		busy: " answering, hold on…",
-		hints: " Enter send · Esc close · /btw clear reset · /btw lang zh 中文",
+		hints: " Enter send · Esc close · Ctrl+←/→ convos · /btw lang zh 中文",
+		newConvo: "btw: new conversation started",
+		historyTitle: "btw conversations",
+		emptyTag: "(empty)",
 		noteAborted: "[aborted]",
 		noteError: "[error]",
 		noOutput: "(no output)",
@@ -82,11 +103,14 @@ const STRINGS = {
 		cmdDesc: "侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空,/btw lang en English)",
 		welcome: "侧问不打扰主会话:直接在下方输入问题,Enter 发送。",
 		thinking: (s: number) => `🤔 思考中… ${s}s(Esc 中止)`,
-		header: (turns: string, modelId: string) => ` btw · 侧问 · 第 ${turns} 轮 · ${modelId}`,
+		header: (turns: string, modelId: string) => ` btw · 第 ${turns} 轮 · ${modelId}`,
 		scrollUp: (n: number) => ` (↑↓ 滚动 · 距底部 ${n} 行)`,
 		scrollBottom: " (↑↓ 滚动 · 已吸底)",
 		busy: " 回答中,稍等…",
-		hints: " Enter 发送 · Esc 关闭 · /btw clear 清空 · /btw lang en English",
+		hints: " Enter 发送 · Esc 关闭 · Ctrl+←/→ 切对话 · /btw lang en English",
+		newConvo: "btw:已开新对话",
+		historyTitle: "btw 侧问对话",
+		emptyTag: "(空对话)",
 		noteAborted: "[已中止]",
 		noteError: "[出错]",
 		noOutput: "(无输出)",
@@ -100,7 +124,7 @@ const STRINGS = {
 		langNow: (l: string) => `btw 界面语言:${l}`,
 		langSet: (l: string) => `btw 界面语言已切换为 ${l}(已保存)`,
 	},
-} as const;
+};
 
 type Strings = (typeof STRINGS)["en"];
 
@@ -158,6 +182,8 @@ class BtwPanel implements Component, Focusable {
 	private mdCache = new Map<string, string[]>();
 	/** 0 = 吸底跟随最新;>0 = 向上滚动的行数 */
 	private scrollUp = 0;
+	/** 最新一轮在 contentLines 里的起始行(答案完成后定位到开头用) */
+	private lastTurnStart = 0;
 	private _focused = true;
 
 	get focused(): boolean {
@@ -214,7 +240,30 @@ class BtwPanel implements Component, Focusable {
 			this.opts.tui.requestRender();
 			return;
 		}
+		if (matchesKey(data, Key.ctrl("left"))) {
+			this.switchConvo(-1);
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("right"))) {
+			this.switchConvo(1);
+			return;
+		}
 		this.input.handleInput(data);
+		this.opts.tui.requestRender();
+	}
+
+	/** Ctrl+←/→ 在多条侧问对话间循环切换;切换后定位到对话顶部,便于从头回顾 */
+	private switchConvo(dir: number): void {
+		const n = state.convos.length;
+		if (n < 2) return;
+		state.active = (state.active + dir + n) % n;
+		state.seekLatestTurn = false;
+		this.scrollToTop();
+	}
+
+	/** 定位到内容顶部(scrollUp 会在 render 里被 clamp 到 maxScroll) */
+	scrollToTop(): void {
+		this.scrollUp = Number.MAX_SAFE_INTEGER;
 		this.opts.tui.requestRender();
 	}
 
@@ -239,7 +288,9 @@ class BtwPanel implements Component, Focusable {
 	private contentLines(width: number): string[] {
 		const th = this.opts.theme;
 		const lines: string[] = [];
-		for (const turn of state.turns) {
+		const convo = activeConvo();
+		convo.turns.forEach((turn, i) => {
+			if (i === convo.turns.length - 1) this.lastTurnStart = lines.length;
 			// 用户问题走纯文本渲染,防注入(Kimi 评审教训);● 标记+accent 粗体+悬挂缩进,问答之间空行分隔
 			if (lines.length > 0) lines.push(th.fg("dim", "┄".repeat(Math.max(4, width))));
 			const qWrapped = new Text(turn.question, 0, 0).render(Math.max(8, width - 2));
@@ -253,13 +304,13 @@ class BtwPanel implements Component, Focusable {
 			lines.push("");
 			lines.push(...this.renderMarkdown(turn.answer, width));
 			lines.push("");
-		}
+		});
 		if (state.streaming) {
 			// 整段模式:等待指示器由 500ms 心跳驱动刷新,Esc 可中止
 			const secs = Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000));
 			lines.push(th.fg("muted", S().thinking(secs)));
 		}
-		if (state.turns.length === 0 && !state.streaming) {
+		if (convo.turns.length === 0 && !state.streaming) {
 			lines.push(th.fg("muted", S().welcome));
 		}
 		return lines;
@@ -274,11 +325,17 @@ class BtwPanel implements Component, Focusable {
 
 		const all = this.contentLines(innerW - 2);
 		const maxScroll = Math.max(0, all.length - rows);
+		if (state.seekLatestTurn) {
+			state.seekLatestTurn = false;
+			// 新答案定位到最新一轮开头(从上往下读);答案不足一屏时自然吸底
+			this.scrollUp = Math.max(0, all.length - rows - this.lastTurnStart);
+		}
 		this.scrollUp = Math.min(this.scrollUp, maxScroll);
 		const start = Math.max(0, all.length - rows - this.scrollUp);
 		const visible = all.slice(start, start + rows);
 
-		const header = S().header(`${state.turns.length}${state.streaming ? "+" : ""}`, this.opts.modelId);
+		const convoTag = state.convos.length > 1 ? ` · #${state.active + 1}/${state.convos.length}` : "";
+		const header = S().header(`${activeConvo().turns.length}${state.streaming ? "+" : ""}`, this.opts.modelId) + convoTag;
 		let scrollHint = "";
 		if (maxScroll > 0) scrollHint = this.scrollUp > 0 ? S().scrollUp(this.scrollUp) : S().scrollBottom;
 		const busy = state.busyNotice ? th.fg("warning", S().busy) : "";
@@ -311,12 +368,50 @@ function makeTokenEstimator(): (text: string) => number {
 	};
 }
 
+/** 对话标题兜底:截取问题首行 */
+function fallbackTitle(question: string): string {
+	const nl = question.indexOf("\n");
+	const first = (nl >= 0 ? question.slice(0, nl) : question).trim();
+	return truncateToWidth(first, 24, "…");
+}
+
+/** 首答完成后后台生成对话小标题(模型摘要,失败保留截断兜底) */
+async function generateConvoTitle(ctx: ExtensionCommandContext, question: string, convo: SideConvo, tui: TUI): Promise<void> {
+	const model = ctx.model;
+	if (!model) return;
+	try {
+		const final = await ctx.modelRegistry.complete(
+			model,
+			{
+				systemPrompt: "用与问题相同的语言,把用户问题的主题概括成不超过 12 个字的短标题;只输出标题本身,不要标点结尾,不要解释。",
+				messages: [{ role: "user", content: [{ type: "text", text: question }], timestamp: Date.now() } as any],
+			},
+			{ reasoning: "off" as any },
+		);
+		const text = (final.content as Array<{ type: string; text?: string }>)
+			.filter((c) => c.type === "text" && typeof c.text === "string")
+			.map((c) => c.text as string)
+			.join("")
+			.trim();
+		const nl = text.indexOf("\n");
+		const first = (nl >= 0 ? text.slice(0, nl) : text).trim();
+		if (first) {
+			convo.title = truncateToWidth(first, 30, "…");
+			tui.requestRender();
+		}
+	} catch {
+		return; // 标题生成失败不致命
+	}
+}
+
 async function runSideQuestion(ctx: ExtensionCommandContext, question: string, tui: TUI): Promise<void> {
 	const model = ctx.model;
 	if (!model) {
 		ctx.ui.notify(S().noModel, "error");
 		return;
 	}
+	const convo = activeConvo();
+	if (!convo.title) convo.title = fallbackTitle(question);
 	state.streaming = true;
 	state.startedAt = Date.now();
 	state.abort = new AbortController();
@@ -324,7 +419,7 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 	const ticker = setInterval(() => tui.requestRender(), 500);
 	try {
 		const packed = packContext(extractMessages(ctx.sessionManager.getBranch()), DEFAULT_CONTEXT_TOKEN_BUDGET, makeTokenEstimator());
-		const messages = buildMessages(packed, state.turns, question).map((m) => ({ ...m, timestamp: Date.now() }));
+		const messages = buildMessages(packed, convo.turns, question).map((m) => ({ ...m, timestamp: Date.now() }));
 		const context = { systemPrompt: SIDE_SYSTEM_PROMPT, messages: messages as any };
 		const final = await ctx.modelRegistry.complete(model, context, {
 			signal: state.abort.signal,
@@ -339,21 +434,24 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 		let answer = textParts.join("\n") || S().noText;
 		if (hadToolCalls) answer += S().toolIgnored;
 		if (final.stopReason === "aborted") {
-			state.turns.push({ question, answer: S().noOutput, aborted: true });
+			convo.turns.push({ question, answer: S().noOutput, aborted: true });
 		} else if (final.stopReason === "error") {
-			state.turns.push({ question, answer: `${S().errPrefix}${(final as any).errorMessage ?? S().unknownError}`, error: true });
+			convo.turns.push({ question, answer: `${S().errPrefix}${(final as any).errorMessage ?? S().unknownError}`, error: true });
 		} else {
-			state.turns.push({ question, answer });
+			convo.turns.push({ question, answer });
+			// 首轮答案落地后,后台让模型给这条对话起个小标题(用户拍板:模型生成摘要)
+			if (convo.turns.length === 1) void generateConvoTitle(ctx, question, convo, tui);
 		}
 	} catch (e) {
 		if (state.abort?.signal.aborted) {
-			state.turns.push({ question, answer: S().noOutput, aborted: true });
+			convo.turns.push({ question, answer: S().noOutput, aborted: true });
 		} else {
-			state.turns.push({ question, answer: `${S().errPrefix}${e instanceof Error ? e.message : String(e)}`, error: true });
+			convo.turns.push({ question, answer: `${S().errPrefix}${e instanceof Error ? e.message : String(e)}`, error: true });
 		}
 	} finally {
 		clearInterval(ticker);
 		state.streaming = false;
+		state.seekLatestTurn = true; // 答案落地,定位到本轮开头
 		state.startedAt = 0;
 		state.abort = undefined;
 		tui.requestRender();
@@ -370,7 +468,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(S().tuiOnly, "error");
 				return;
 			}
-			const q = (args ?? "").trim();
+			let q = (args ?? "").trim();
 			const langArg = q.match(/^lang(?:\s+(zh|en|auto))?$/i);
 			if (langArg) {
 				const target = (langArg[1] ?? "").toLowerCase();
@@ -387,9 +485,27 @@ export default function (pi: ExtensionAPI) {
 				}
 				return;
 			}
-			if (q === "clear") {
+			let openAtTop = false;
+			if (q === "new") {
+				state.convos.push({ title: "", turns: [], createdAt: Date.now() });
+				state.active = state.convos.length - 1;
+				ctx.ui.notify(S().newConvo, "info");
+				q = ""; // 消费掉指令,继续往下打开空面板
+			} else if (q === "history") {
+				const options = state.convos.map((c, i) => `${i + 1}. ${c.title || S().emptyTag}`);
+				const choice = await ctx.ui.select(S().historyTitle, options);
+				if (!choice) return;
+				const idx = options.indexOf(choice);
+				if (idx >= 0) {
+					state.active = idx;
+					openAtTop = true;
+				}
+				q = ""; // 消费掉指令,继续往下打开面板回顾
+			} else if (q === "clear") {
 				state.abort?.abort();
-				state.turns.length = 0;
+				const convo = activeConvo();
+				convo.turns.length = 0;
+				convo.title = "";
 				state.startedAt = 0;
 				ctx.ui.notify(S().cleared, "info");
 				return;
@@ -415,6 +531,8 @@ export default function (pi: ExtensionAPI) {
 							done(null);
 						},
 					});
+					// /btw history 切换而来:定位到对话顶部,从头回顾
+					if (openAtTop && panel) panel.scrollToTop();
 					// /btw <问题>:面板打开后立即发问
 					if (q && !state.streaming) {
 						const tuiRef = tui;
