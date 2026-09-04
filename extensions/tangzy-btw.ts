@@ -17,6 +17,7 @@ import {
 	Input,
 	Key,
 	Markdown,
+	Text,
 	matchesKey,
 	truncateToWidth,
 	type Component,
@@ -45,12 +46,7 @@ interface SideState {
 	startedAt: number;
 }
 
-const state: SideState = {
-	turns: [],
-	streaming: false,
-	busyNotice: false,
-	startedAt: 0,
-};
+const state: SideState = { turns: [], streaming: false, busyNotice: false, startedAt: 0 };
 /** 面板固定 chrome 行数:上下边框 + 头部 + 输入行 + 提示行 */
 const CHROME_ROWS = 6;
 /** 历史区最少可见行数 */
@@ -148,15 +144,9 @@ class BtwPanel implements Component, Focusable {
 		const key = `${width}:${text.length}:${text.slice(0, 48)}:${text.slice(-48)}`;
 		const cached = this.mdCache.get(key);
 		if (cached) return cached;
-		const lines = new Markdown(
-			this.closeUnclosedFences(text.trim()),
-			1,
-			0,
-			this.mdTheme,
-		).render(width);
+		const lines = new Markdown(this.closeUnclosedFences(text.trim()), 1, 0, this.mdTheme).render(width);
 		// LRU 逐出最旧一条;不整体 clear(历史上整体 clear 曾把历史答案精排缓存全冲掉)
-		if (this.mdCache.size > 60)
-			this.mdCache.delete(this.mdCache.keys().next().value as string);
+		if (this.mdCache.size > 60) this.mdCache.delete(this.mdCache.keys().next().value as string);
 		this.mdCache.set(key, lines);
 		return lines;
 	}
@@ -165,8 +155,11 @@ class BtwPanel implements Component, Focusable {
 		const th = this.opts.theme;
 		const lines: string[] = [];
 		for (const turn of state.turns) {
-			// 用户问题走纯文本渲染,防注入(Kimi 评审教训)
-			lines.push(th.fg("accent", `› ${turn.question}`));
+			// 用户问题走纯文本渲染,防注入(Kimi 评审教训);粗体+accent+虚线分隔,一眼区分轮次
+			if (lines.length > 0) lines.push(th.fg("dim", "┄".repeat(Math.max(4, width))));
+			for (const qline of new Text(`❯ ${turn.question}`, 0, 0).render(width)) {
+				lines.push(th.fg("accent", th.bold(qline)));
+			}
 			let note = "";
 			if (turn.aborted) note = " [已中止]";
 			else if (turn.error) note = " [出错]";
@@ -180,9 +173,7 @@ class BtwPanel implements Component, Focusable {
 			lines.push(th.fg("muted", `🤔 思考中… ${secs}s(Esc 中止)`));
 		}
 		if (state.turns.length === 0 && !state.streaming) {
-			lines.push(
-				th.fg("muted", "侧问不打扰主会话:直接在下方输入问题,Enter 发送。"),
-			);
+			lines.push(th.fg("muted", "侧问不打扰主会话:直接在下方输入问题,Enter 发送。"));
 		}
 		return lines;
 	}
@@ -201,24 +192,16 @@ class BtwPanel implements Component, Focusable {
 		const visible = all.slice(start, start + rows);
 
 		const header = ` btw · 侧问 · 第 ${state.turns.length}${state.streaming ? "+" : ""} 轮 · ${this.opts.modelId}`;
-		const scrollHint =
-			maxScroll > 0
-				? ` (↑↓ 滚动 ${this.scrollUp > 0 ? `· 距底部 ${this.scrollUp} 行` : "· 已吸底"})`
-				: "";
+		const scrollHint = maxScroll > 0 ? ` (↑↓ 滚动 ${this.scrollUp > 0 ? `· 距底部 ${this.scrollUp} 行` : "· 已吸底"})` : "";
 		const busy = state.busyNotice ? th.fg("warning", " 回答中,稍等…") : "";
 		state.busyNotice = false;
 		const hints = ` Enter 发送 · Esc 关闭 · /btw clear 清空${scrollHint}`;
 
 		const lines: string[] = [];
 		lines.push(border(`╭${"─".repeat(innerW)}╮`));
-		lines.push(
-			border("│") +
-				pad(` ${th.fg("accent", th.bold(header.trim()))}`) +
-				border("│"),
-		);
+		lines.push(border("│") + pad(` ${th.fg("accent", th.bold(header.trim()))}`) + border("│"));
 		for (const l of visible) lines.push(border("│") + pad(` ${l}`) + border("│"));
-		for (let i = visible.length; i < rows; i++)
-			lines.push(border("│") + pad("") + border("│"));
+		for (let i = visible.length; i < rows; i++) lines.push(border("│") + pad("") + border("│"));
 		const [inputLine = ""] = this.input.render(Math.max(1, innerW - 4));
 		lines.push(border("│") + pad(` › ${inputLine}`) + border("│"));
 		lines.push(border("│") + pad(th.fg("dim", hints) + busy) + border("│"));
@@ -233,22 +216,14 @@ class BtwPanel implements Component, Focusable {
 function makeTokenEstimator(): (text: string) => number {
 	return (text: string) => {
 		try {
-			return estimateTokens({
-				role: "user",
-				content: [{ type: "text", text }],
-				timestamp: 0,
-			} as any);
+			return estimateTokens({ role: "user", content: [{ type: "text", text }], timestamp: 0 } as any);
 		} catch {
 			return charTokenEstimate(text);
 		}
 	};
 }
 
-async function runSideQuestion(
-	ctx: ExtensionCommandContext,
-	question: string,
-	tui: TUI,
-): Promise<void> {
+async function runSideQuestion(ctx: ExtensionCommandContext, question: string, tui: TUI): Promise<void> {
 	const model = ctx.model;
 	if (!model) {
 		ctx.ui.notify("btw: 当前没有可用模型", "error");
@@ -260,19 +235,9 @@ async function runSideQuestion(
 	// 整段模式(2026-09-04 用户拍板砍流式):500ms 心跳驱动等待指示器计时刷新
 	const ticker = setInterval(() => tui.requestRender(), 500);
 	try {
-		const packed = packContext(
-			extractMessages(ctx.sessionManager.getBranch()),
-			DEFAULT_CONTEXT_TOKEN_BUDGET,
-			makeTokenEstimator(),
-		);
-		const messages = buildMessages(packed, state.turns, question).map((m) => ({
-			...m,
-			timestamp: Date.now(),
-		}));
-		const context = {
-			systemPrompt: SIDE_SYSTEM_PROMPT,
-			messages: messages as any,
-		};
+		const packed = packContext(extractMessages(ctx.sessionManager.getBranch()), DEFAULT_CONTEXT_TOKEN_BUDGET, makeTokenEstimator());
+		const messages = buildMessages(packed, state.turns, question).map((m) => ({ ...m, timestamp: Date.now() }));
+		const context = { systemPrompt: SIDE_SYSTEM_PROMPT, messages: messages as any };
 		const final = await ctx.modelRegistry.complete(model, context, {
 			signal: state.abort.signal,
 			reasoning: ctx.thinkingLevel as any,
@@ -282,20 +247,13 @@ async function runSideQuestion(
 		const textParts = (final.content as Array<{ type: string; text?: string }>)
 			.filter((c) => c.type === "text" && typeof c.text === "string")
 			.map((c) => c.text as string);
-		const hadToolCalls = (final.content as Array<{ type: string }>).some(
-			(c) => c.type === "toolCall",
-		);
+		const hadToolCalls = (final.content as Array<{ type: string }>).some((c) => c.type === "toolCall");
 		let answer = textParts.join("\n") || "(无文本输出)";
-		if (hadToolCalls)
-			answer += "\n\n*(模型尝试调用工具,已忽略——侧问不执行任何操作)*";
+		if (hadToolCalls) answer += "\n\n*(模型尝试调用工具,已忽略——侧问不执行任何操作)*";
 		if (final.stopReason === "aborted") {
 			state.turns.push({ question, answer: "(无输出)", aborted: true });
 		} else if (final.stopReason === "error") {
-			state.turns.push({
-				question,
-				answer: `出错:${(final as any).errorMessage ?? "未知错误"}`,
-				error: true,
-			});
+			state.turns.push({ question, answer: `出错:${(final as any).errorMessage ?? "未知错误"}`, error: true });
 		} else {
 			state.turns.push({ question, answer });
 		}
@@ -303,11 +261,7 @@ async function runSideQuestion(
 		if (state.abort?.signal.aborted) {
 			state.turns.push({ question, answer: "(无输出)", aborted: true });
 		} else {
-			state.turns.push({
-				question,
-				answer: `出错:${e instanceof Error ? e.message : String(e)}`,
-				error: true,
-			});
+			state.turns.push({ question, answer: `出错:${e instanceof Error ? e.message : String(e)}`, error: true });
 		}
 	} finally {
 		clearInterval(ticker);
@@ -322,8 +276,7 @@ async function runSideQuestion(
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("btw", {
-		description:
-			"侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空)",
+		description: "侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空)",
 		handler: async (args, ctx) => {
 			if (ctx.mode !== "tui") {
 				ctx.ui.notify("btw 仅支持交互模式", "error");
