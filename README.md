@@ -4,6 +4,8 @@
 [![pi package](https://img.shields.io/badge/pi-package-brightgreen)](https://pi.dev/packages)
 [![tests](https://img.shields.io/badge/node--test-12%2F12%20passing-success)](extensions/tangzy-btw/lib.test.ts)
 
+![tangzy-btw panel: a side question answered with markdown and syntax-highlighted code](docs/screenshot.png)
+
 A KimiCode-style `/btw` side-question extension for [pi](https://github.com/earendil-works/pi-coding-agent). Ask a quick side question without interrupting your main session — the answer arrives in a bottom overlay panel with full markdown rendering, and nothing ever touches your main transcript.
 
 ## Why
