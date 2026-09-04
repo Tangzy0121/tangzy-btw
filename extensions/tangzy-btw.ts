@@ -59,7 +59,14 @@ interface SideState {
 	seekLatestTurn: boolean;
 }
 
-const state: SideState = { convos: [{ title: "", turns: [], createdAt: Date.now() }], active: 0, streaming: false, busyNotice: false, startedAt: 0, seekLatestTurn: false };
+const state: SideState = {
+	convos: [{ title: "", turns: [], createdAt: Date.now() }],
+	active: 0,
+	streaming: false,
+	busyNotice: false,
+	startedAt: 0,
+	seekLatestTurn: false,
+};
 
 function activeConvo(): SideConvo {
 	const c = state.convos[state.active];
@@ -75,10 +82,13 @@ type Lang = "zh" | "en";
 
 const STRINGS = {
 	en: {
-		cmdDesc: "Side question: quick Q&A without touching the main session (bottom panel, markdown, follow-ups; /btw clear, /btw lang zh 中文)",
-		welcome: "Ask away — this side thread never touches your main session. Type below, Enter to send.",
+		cmdDesc:
+			"Side question: quick Q&A without touching the main session (bottom panel, markdown, follow-ups; /btw clear, /btw lang zh 中文)",
+		welcome:
+			"Ask away — this side thread never touches your main session. Type below, Enter to send.",
 		thinking: (s: number) => `🤔 thinking… ${s}s (Esc to abort)`,
-		header: (turns: string, modelId: string) => ` btw · turn ${turns} · ${modelId}`,
+		header: (turns: string, modelId: string) =>
+			` btw · turn ${turns} · ${modelId}`,
 		scrollUp: (n: number) => ` (↑↓ scroll · ${n} lines from bottom)`,
 		scrollBottom: " (↑↓ scroll · at bottom)",
 		busy: " answering, hold on…",
@@ -90,7 +100,8 @@ const STRINGS = {
 		noteError: "[error]",
 		noOutput: "(no output)",
 		noText: "(no text output)",
-		toolIgnored: "\n\n*(the model tried to call tools — ignored; side questions never execute anything)*",
+		toolIgnored:
+			"\n\n*(the model tried to call tools — ignored; side questions never execute anything)*",
 		errPrefix: "Error: ",
 		unknownError: "unknown error",
 		noModel: "btw: no model available",
@@ -100,10 +111,12 @@ const STRINGS = {
 		langSet: (l: string) => `btw language: ${l} (saved)`,
 	},
 	zh: {
-		cmdDesc: "侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空,/btw lang en English)",
+		cmdDesc:
+			"侧问:不打扰主会话的快速问答(底部面板,markdown,支持追问;/btw clear 清空,/btw lang en English)",
 		welcome: "侧问不打扰主会话:直接在下方输入问题,Enter 发送。",
 		thinking: (s: number) => `🤔 思考中… ${s}s(Esc 中止)`,
-		header: (turns: string, modelId: string) => ` btw · 第 ${turns} 轮 · ${modelId}`,
+		header: (turns: string, modelId: string) =>
+			` btw · 第 ${turns} 轮 · ${modelId}`,
 		scrollUp: (n: number) => ` (↑↓ 滚动 · 距底部 ${n} 行)`,
 		scrollBottom: " (↑↓ 滚动 · 已吸底)",
 		busy: " 回答中,稍等…",
@@ -129,7 +142,8 @@ const STRINGS = {
 type Strings = (typeof STRINGS)["en"];
 
 function detectLang(): Lang {
-	const v = `${process.env.LANG ?? ""} ${process.env.LC_ALL ?? ""} ${process.env.LANGUAGE ?? ""}`.toLowerCase();
+	const v =
+		`${process.env.LANG ?? ""} ${process.env.LC_ALL ?? ""} ${process.env.LANGUAGE ?? ""}`.toLowerCase();
 	return v.includes("zh") ? "zh" : "en";
 }
 
@@ -148,7 +162,11 @@ function loadLang(): Lang {
 function saveLang(lang: Lang | "auto"): void {
 	try {
 		mkdirSync(dirname(LANG_FILE), { recursive: true });
-		writeFileSync(LANG_FILE, JSON.stringify(lang === "auto" ? {} : { lang }), "utf-8");
+		writeFileSync(
+			LANG_FILE,
+			JSON.stringify(lang === "auto" ? {} : { lang }),
+			"utf-8",
+		);
 	} catch {
 		return; // 持久化失败不致命
 	}
@@ -251,7 +269,10 @@ class BtwPanel implements Component, Focusable {
 			this.switchConvo(-1);
 			return;
 		}
-		if (matchesKey(data, Key.ctrl("right")) || matchesKey(data, Key.alt("right"))) {
+		if (
+			matchesKey(data, Key.ctrl("right")) ||
+			matchesKey(data, Key.alt("right"))
+		) {
 			this.switchConvo(1);
 			return;
 		}
@@ -330,9 +351,15 @@ class BtwPanel implements Component, Focusable {
 		const key = `${width}:${text.length}:${text.slice(0, 48)}:${text.slice(-48)}`;
 		const cached = this.mdCache.get(key);
 		if (cached) return cached;
-		const lines = new Markdown(this.closeUnclosedFences(text.trim()), 1, 0, this.mdTheme).render(width);
+		const lines = new Markdown(
+			this.closeUnclosedFences(text.trim()),
+			1,
+			0,
+			this.mdTheme,
+		).render(width);
 		// LRU 逐出最旧一条;不整体 clear(历史上整体 clear 曾把历史答案精排缓存全冲掉)
-		if (this.mdCache.size > 60) this.mdCache.delete(this.mdCache.keys().next().value as string);
+		if (this.mdCache.size > 60)
+			this.mdCache.delete(this.mdCache.keys().next().value as string);
 		this.mdCache.set(key, lines);
 		return lines;
 	}
@@ -346,8 +373,11 @@ class BtwPanel implements Component, Focusable {
 			this.turnStarts.push(lines.length);
 			if (i === convo.turns.length - 1) this.lastTurnStart = lines.length;
 			// 用户问题走纯文本渲染,防注入(Kimi 评审教训);● 标记+accent 粗体+悬挂缩进,问答之间空行分隔
-			if (lines.length > 0) lines.push(th.fg("dim", "┄".repeat(Math.max(4, width))));
-			const qWrapped = new Text(turn.question, 0, 0).render(Math.max(8, width - 2));
+			if (lines.length > 0)
+				lines.push(th.fg("dim", "┄".repeat(Math.max(4, width))));
+			const qWrapped = new Text(turn.question, 0, 0).render(
+				Math.max(8, width - 2),
+			);
 			qWrapped.forEach((qline, i) => {
 				lines.push(th.fg("accent", th.bold((i === 0 ? "● " : "  ") + qline)));
 			});
@@ -391,24 +421,36 @@ class BtwPanel implements Component, Focusable {
 		this.lastTotal = all.length;
 		this.lastRows = rows;
 		this.viewTop = start;
-		const convoTag = state.convos.length > 1 ? ` · #${state.active + 1}/${state.convos.length}` : "";
+		const convoTag =
+			state.convos.length > 1
+				? ` · #${state.active + 1}/${state.convos.length}`
+				: "";
 		// 表头显示视口顶所在的轮次:第 当前/总数 轮
 		const total = activeConvo().turns.length;
 		let cur = 0;
 		for (const s of this.turnStarts) if (s <= this.viewTop) cur += 1;
 		const turnStr = total === 0 ? "0" : `${Math.max(1, cur)}/${total}`;
-		const header = S().header(`${turnStr}${state.streaming ? "+" : ""}`, this.opts.modelId) + convoTag;
+		const header =
+			S().header(`${turnStr}${state.streaming ? "+" : ""}`, this.opts.modelId) +
+			convoTag;
 		let scrollHint = "";
-		if (maxScroll > 0) scrollHint = this.scrollUp > 0 ? S().scrollUp(this.scrollUp) : S().scrollBottom;
+		if (maxScroll > 0)
+			scrollHint =
+				this.scrollUp > 0 ? S().scrollUp(this.scrollUp) : S().scrollBottom;
 		const busy = state.busyNotice ? th.fg("warning", S().busy) : "";
 		state.busyNotice = false;
 		const hints = `${S().hints}${scrollHint}`;
 
 		const lines: string[] = [];
 		lines.push(border(`╭${"─".repeat(innerW)}╮`));
-		lines.push(border("│") + pad(` ${th.fg("accent", th.bold(header.trim()))}`) + border("│"));
+		lines.push(
+			border("│") +
+				pad(` ${th.fg("accent", th.bold(header.trim()))}`) +
+				border("│"),
+		);
 		for (const l of visible) lines.push(border("│") + pad(` ${l}`) + border("│"));
-		for (let i = visible.length; i < rows; i++) lines.push(border("│") + pad("") + border("│"));
+		for (let i = visible.length; i < rows; i++)
+			lines.push(border("│") + pad("") + border("│"));
 		const [inputLine = ""] = this.input.render(Math.max(1, innerW - 4));
 		lines.push(border("│") + pad(` › ${inputLine}`) + border("│"));
 		lines.push(border("│") + pad(th.fg("dim", hints) + busy) + border("│"));
@@ -423,7 +465,11 @@ class BtwPanel implements Component, Focusable {
 function makeTokenEstimator(): (text: string) => number {
 	return (text: string) => {
 		try {
-			return estimateTokens({ role: "user", content: [{ type: "text", text }], timestamp: 0 } as any);
+			return estimateTokens({
+				role: "user",
+				content: [{ type: "text", text }],
+				timestamp: 0,
+			} as any);
 		} catch {
 			return charTokenEstimate(text);
 		}
@@ -438,15 +484,27 @@ function fallbackTitle(question: string): string {
 }
 
 /** 首答完成后后台生成对话小标题(模型摘要,失败保留截断兜底) */
-async function generateConvoTitle(ctx: ExtensionCommandContext, question: string, convo: SideConvo, tui: TUI): Promise<void> {
+async function generateConvoTitle(
+	ctx: ExtensionCommandContext,
+	question: string,
+	convo: SideConvo,
+	tui: TUI,
+): Promise<void> {
 	const model = ctx.model;
 	if (!model) return;
 	try {
 		const final = await ctx.modelRegistry.complete(
 			model,
 			{
-				systemPrompt: "用与问题相同的语言,把用户问题的主题概括成不超过 12 个字的短标题;只输出标题本身,不要标点结尾,不要解释。",
-				messages: [{ role: "user", content: [{ type: "text", text: question }], timestamp: Date.now() } as any],
+				systemPrompt:
+					"用与问题相同的语言,把用户问题的主题概括成不超过 12 个字的短标题;只输出标题本身,不要标点结尾,不要解释。",
+				messages: [
+					{
+						role: "user",
+						content: [{ type: "text", text: question }],
+						timestamp: Date.now(),
+					} as any,
+				],
 			},
 			{ reasoning: "off" as any },
 		);
@@ -466,7 +524,11 @@ async function generateConvoTitle(ctx: ExtensionCommandContext, question: string
 	}
 }
 
-async function runSideQuestion(ctx: ExtensionCommandContext, question: string, tui: TUI): Promise<void> {
+async function runSideQuestion(
+	ctx: ExtensionCommandContext,
+	question: string,
+	tui: TUI,
+): Promise<void> {
 	const model = ctx.model;
 	if (!model) {
 		ctx.ui.notify(S().noModel, "error");
@@ -480,9 +542,19 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 	// 整段模式(2026-09-04 用户拍板砍流式):500ms 心跳驱动等待指示器计时刷新
 	const ticker = setInterval(() => tui.requestRender(), 500);
 	try {
-		const packed = packContext(extractMessages(ctx.sessionManager.getBranch()), DEFAULT_CONTEXT_TOKEN_BUDGET, makeTokenEstimator());
-		const messages = buildMessages(packed, convo.turns, question).map((m) => ({ ...m, timestamp: Date.now() }));
-		const context = { systemPrompt: SIDE_SYSTEM_PROMPT, messages: messages as any };
+		const packed = packContext(
+			extractMessages(ctx.sessionManager.getBranch()),
+			DEFAULT_CONTEXT_TOKEN_BUDGET,
+			makeTokenEstimator(),
+		);
+		const messages = buildMessages(packed, convo.turns, question).map((m) => ({
+			...m,
+			timestamp: Date.now(),
+		}));
+		const context = {
+			systemPrompt: SIDE_SYSTEM_PROMPT,
+			messages: messages as any,
+		};
 		const final = await ctx.modelRegistry.complete(model, context, {
 			signal: state.abort.signal,
 			reasoning: ctx.thinkingLevel as any,
@@ -492,23 +564,34 @@ async function runSideQuestion(ctx: ExtensionCommandContext, question: string, t
 		const textParts = (final.content as Array<{ type: string; text?: string }>)
 			.filter((c) => c.type === "text" && typeof c.text === "string")
 			.map((c) => c.text as string);
-		const hadToolCalls = (final.content as Array<{ type: string }>).some((c) => c.type === "toolCall");
+		const hadToolCalls = (final.content as Array<{ type: string }>).some(
+			(c) => c.type === "toolCall",
+		);
 		let answer = textParts.join("\n") || S().noText;
 		if (hadToolCalls) answer += S().toolIgnored;
 		if (final.stopReason === "aborted") {
 			convo.turns.push({ question, answer: S().noOutput, aborted: true });
 		} else if (final.stopReason === "error") {
-			convo.turns.push({ question, answer: `${S().errPrefix}${(final as any).errorMessage ?? S().unknownError}`, error: true });
+			convo.turns.push({
+				question,
+				answer: `${S().errPrefix}${(final as any).errorMessage ?? S().unknownError}`,
+				error: true,
+			});
 		} else {
 			convo.turns.push({ question, answer });
 			// 首轮答案落地后,后台让模型给这条对话起个小标题(用户拍板:模型生成摘要)
-			if (convo.turns.length === 1) void generateConvoTitle(ctx, question, convo, tui);
+			if (convo.turns.length === 1)
+				void generateConvoTitle(ctx, question, convo, tui);
 		}
 	} catch (e) {
 		if (state.abort?.signal.aborted) {
 			convo.turns.push({ question, answer: S().noOutput, aborted: true });
 		} else {
-			convo.turns.push({ question, answer: `${S().errPrefix}${e instanceof Error ? e.message : String(e)}`, error: true });
+			convo.turns.push({
+				question,
+				answer: `${S().errPrefix}${e instanceof Error ? e.message : String(e)}`,
+				error: true,
+			});
 		}
 	} finally {
 		clearInterval(ticker);
@@ -554,7 +637,9 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(S().newConvo, "info");
 				q = ""; // 消费掉指令,继续往下打开空面板
 			} else if (q === "history") {
-				const options = state.convos.map((c, i) => `${i + 1}. ${c.title || S().emptyTag}`);
+				const options = state.convos.map(
+					(c, i) => `${i + 1}. ${c.title || S().emptyTag}`,
+				);
 				const choice = await ctx.ui.select(S().historyTitle, options);
 				if (!choice) return;
 				const idx = options.indexOf(choice);

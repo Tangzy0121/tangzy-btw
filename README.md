@@ -25,7 +25,7 @@ Design inspired by KimiCode's side-question feature ([MoonshotAI/kimi-cli PR #17
 - Read-only snapshot of your main session (branch messages packed under a ~20k token budget) so the side answer knows what you're working on
 - **Never pollutes the main transcript** — the side thread lives in process memory only and is gone on exit
 - `/btw clear` — wipe the current conversation
-- **Multiple side conversations** — `/btw new` starts a fresh one, `/btw history` lists them with model-generated titles, and `Ctrl+←`/`Ctrl+→` cycles inside the panel. Switching back opens the conversation at the top for review
+- **Multiple side conversations** — `/btw new` starts a fresh one, `/btw history` lists them with model-generated titles, and `Alt+←`/`Alt+→` cycles inside the panel. Switching back opens the conversation at the top for review
 - **Answers land at their beginning**, not pinned to the bottom — humans read top-down. Each answer also ends with a `> Recap:` one-liner
 - **Bilingual UI (English/中文)** — auto-detected from `LANG`/`LC_ALL` (default English, matching pi itself); `/btw lang zh|en|auto` overrides and persists to `~/.pi/agent/tangzy-btw.json`. Answers follow the question's language automatically
 - `Esc` closes the panel (aborting any in-flight answer); `↑`/`↓` (and PgUp/PgDn) scroll long answers
@@ -35,10 +35,10 @@ Design inspired by KimiCode's side-question feature ([MoonshotAI/kimi-cli PR #17
 ## Install
 
 ```bash
-pi install git:github.com/Tangzy0121/tangzy-btw
+pi install npm:tangzy-btw
 ```
 
-(or `pi install https://github.com/Tangzy0121/tangzy-btw`)
+(or from source: `pi install git:github.com/Tangzy0121/tangzy-btw`)
 
 Restart pi, then type `/btw <your question>` in the main input.
 
