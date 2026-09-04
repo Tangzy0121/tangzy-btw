@@ -24,8 +24,8 @@ import {
 	type Focusable,
 	type TUI,
 } from "@earendil-works/pi-tui";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
 	buildMessages,
@@ -82,7 +82,7 @@ const STRINGS = {
 		scrollUp: (n: number) => ` (↑↓ scroll · ${n} lines from bottom)`,
 		scrollBottom: " (↑↓ scroll · at bottom)",
 		busy: " answering, hold on…",
-		hints: " Enter send · Esc close · Alt+←/→ convos · Alt+↑/↓ turns",
+		hints: " Enter send · Esc close · Alt+←/→ convos · ^P/^N turns",
 		newConvo: "btw: new conversation started",
 		historyTitle: "btw conversations",
 		emptyTag: "(empty)",
@@ -107,7 +107,7 @@ const STRINGS = {
 		scrollUp: (n: number) => ` (↑↓ 滚动 · 距底部 ${n} 行)`,
 		scrollBottom: " (↑↓ 滚动 · 已吸底)",
 		busy: " 回答中,稍等…",
-		hints: " Enter 发送 · Esc 关闭 · Alt+←/→ 对话 · Alt+↑/↓ 轮次",
+		hints: " Enter 发送 · Esc 关闭 · Alt+←/→ 对话 · ^P/^N 轮次",
 		newConvo: "btw:已开新对话",
 		historyTitle: "btw 侧问对话",
 		emptyTag: "(空对话)",
@@ -134,6 +134,9 @@ function detectLang(): Lang {
 }
 
 const LANG_FILE = join(homedir(), ".pi", "agent", "tangzy-btw.json");
+/** 临时诊断:转义序列键位日志(Warp Alt+↑/↓ 排查完即删) */
+const KEYLOG = join(tmpdir(), "btw-keys.log");
+let keylogBroken = false;
 
 function loadLang(): Lang {
 	try {
@@ -222,6 +225,14 @@ class BtwPanel implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		// 临时诊断(2026-09-04,Warp Alt+↑/↓ 失灵排查):只记录 ESC 开头的转义序列,不记录可打印文本
+		if (data.startsWith("\x1b")) {
+			try {
+				appendFileSync(KEYLOG, `${JSON.stringify(data)}\n`);
+			} catch {
+				keylogBroken = true; // 诊断日志失败不影响输入
+			}
+		}
 		if (matchesKey(data, Key.escape)) {
 			this.opts.onClose();
 			return;
@@ -261,6 +272,15 @@ class BtwPanel implements Component, Focusable {
 			return;
 		}
 		if (matchesKey(data, Key.alt("down"))) {
+			this.jumpTurn(1);
+			return;
+		}
+		// 轮次跳转备选:Ctrl+P/N(readline 惯例;Warp 会截 Alt+↑/↓,这对键久经考验)
+		if (matchesKey(data, Key.ctrl("p"))) {
+			this.jumpTurn(-1);
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("n"))) {
 			this.jumpTurn(1);
 			return;
 		}

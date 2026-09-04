@@ -54,7 +54,8 @@ Restart pi, then type `/btw <your question>` in the main input.
 | `/btw new` | Start a new side conversation |
 | `/btw history` | Pick a past conversation to review (opens at top) |
 | `Alt+←/→` (or `Ctrl+←/→`) in panel | Cycle conversations |
-| `Alt+↑/↓` in panel | Jump between turns (lands on the question of that turn) |
+| `Ctrl+P` / `Ctrl+N` in panel | Jump to previous/next turn (lands on that turn's question) |
+| `Alt+↑/↓` in panel | Same, where the terminal forwards Alt+arrows |
 | `/btw lang zh\|en\|auto` | Switch UI language (persisted) |
 
 ## Development
